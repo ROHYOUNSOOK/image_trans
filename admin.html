@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>관리자 · 이미지 텍스트 레이어 에디터</title>
+<style>
+  :root{
+    --bg:#111417; --panel:#1a1f24; --panel2:#20262c;
+    --line:#2c343c; --ink:#e8ecef; --sub:#8a949e;
+    --accent:#4fd1a5; --accent-ink:#0c211a; --warn:#f6c453; --danger:#f07178;
+    --mono:'SF Mono',Consolas,'Malgun Gothic',monospace;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--ink);font:14px/1.5 -apple-system,'Pretendard','Malgun Gothic',sans-serif;min-height:100vh}
+  header{display:flex;align-items:center;gap:12px;padding:12px 20px;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--bg);z-index:2}
+  header h1{font-size:15px;font-weight:700}
+  header a,header button{
+    background:var(--panel2);color:var(--ink);border:1px solid var(--line);
+    border-radius:8px;padding:7px 11px;font-size:12px;font-weight:700;text-decoration:none;cursor:pointer;font-family:inherit
+  }
+  header .who{margin-left:auto;font-size:12px;color:var(--sub)}
+  .tabs{display:flex;gap:8px;padding:16px 20px 0}
+  .tabs button{
+    background:transparent;color:var(--sub);border:1px solid var(--line);border-radius:999px;
+    padding:8px 14px;font-weight:700;cursor:pointer;font-family:inherit
+  }
+  .tabs button.on{color:var(--accent-ink);background:var(--accent);border-color:var(--accent)}
+  .panel{display:none;padding:16px 20px 40px}
+  .panel.on{display:block}
+  .filters{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px}
+  .filters input{
+    background:var(--panel);border:1px solid var(--line);border-radius:8px;color:var(--ink);
+    padding:9px 12px;font-size:13px;outline:none;font-family:inherit
+  }
+  .filters input:focus{border-color:var(--accent)}
+  .filters .grow{flex:1;min-width:180px}
+  table{width:100%;border-collapse:collapse;background:var(--panel);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+  th,td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{font-size:11px;color:var(--sub);font-weight:700;letter-spacing:.02em;background:var(--panel2)}
+  tr:last-child td{border-bottom:none}
+  .name{font-weight:700}
+  .sub{font:11px var(--mono);color:var(--sub)}
+  .pill{display:inline-block;font:10px var(--mono);font-weight:700;border-radius:999px;padding:2px 8px}
+  .pill.pending{color:#231a04;background:var(--warn)}
+  .pill.approved{color:var(--accent-ink);background:var(--accent)}
+  .pill.rejected{color:#2a1214;background:var(--danger)}
+  .pill.admin{color:var(--ink);background:#3b4550}
+  .pill.user{color:var(--sub);border:1px solid var(--line)}
+  .acts{display:flex;flex-wrap:wrap;gap:6px}
+  .acts button{
+    background:var(--bg);color:var(--ink);border:1px solid var(--line);border-radius:6px;
+    padding:5px 8px;font-size:11px;font-weight:700;cursor:pointer;font-family:inherit
+  }
+  .acts button.ok{border-color:var(--accent);color:var(--accent)}
+  .acts button.no{border-color:var(--danger);color:var(--danger)}
+  .empty{text-align:center;color:var(--sub);padding:48px 12px}
+  .edits{margin-top:6px;font:11px var(--mono);color:var(--sub);display:flex;flex-direction:column;gap:2px}
+  .count{font-weight:800;color:var(--warn)}
+</style>
+</head>
+<body>
+<header>
+  <h1>관리자 콘솔</h1>
+  <a href="/">에디터로</a>
+  <span class="who" id="who"></span>
+  <button type="button" id="btnLogout">로그아웃</button>
+</header>
+<div class="tabs">
+  <button type="button" class="on" data-tab="users">사용자 승인</button>
+  <button type="button" data-tab="usage">사용 기록</button>
+</div>
+<section class="panel on" id="tab-users">
+  <div id="usersBox" class="empty">불러오는 중…</div>
+</section>
+<section class="panel" id="tab-usage">
+  <form class="filters" id="filterForm">
+    <input class="grow" name="user" placeholder="사용자 이름 또는 이메일 검색">
+    <input type="date" name="from" title="시작 날짜">
+    <input type="date" name="to" title="끝 날짜">
+    <button type="submit" style="background:var(--accent);color:var(--accent-ink);border:none;border-radius:8px;padding:9px 14px;font-weight:700;cursor:pointer">필터</button>
+  </form>
+  <div id="usageBox" class="empty">불러오는 중…</div>
+</section>
+<script>
+const $=id=>document.getElementById(id);
+const api=(url,opts={})=>fetch(url,Object.assign({credentials:'include'},opts));
+
+document.querySelectorAll('.tabs button').forEach(btn=>{
+  btn.onclick=()=>{
+    document.querySelectorAll('.tabs button').forEach(b=>b.classList.toggle('on', b===btn));
+    document.querySelectorAll('.panel').forEach(p=>p.classList.toggle('on', p.id==='tab-'+btn.dataset.tab));
+  };
+});
+$('btnLogout').onclick=async()=>{ await api('/api/auth/logout',{method:'POST'}); location.href='/'; };
+
+function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+function bytes(n){
+  n=Number(n)||0;
+  if(n<1024) return n+' B';
+  if(n<1024*1024) return (n/1024).toFixed(1)+' KB';
+  return (n/1024/1024).toFixed(2)+' MB';
+}
+function pill(status){
+  const map={pending:'승인 대기',approved:'승인됨',rejected:'거절됨'};
+  return `<span class="pill ${esc(status)}">${map[status]||status}</span>`;
+}
+
+async function loadUsers(){
+  const r=await api('/api/admin/users');
+  const data=await r.json();
+  if(!r.ok){ $('usersBox').textContent=data.error||'불러오기 실패'; return; }
+  if(!data.users.length){ $('usersBox').innerHTML='<div class="empty">아직 로그인한 사용자가 없습니다.</div>'; return; }
+  const order={pending:0,approved:1,rejected:2};
+  data.users.sort((a,b)=>(order[a.status]??9)-(order[b.status]??9));
+  $('usersBox').innerHTML=`<table>
+    <thead><tr><th>사용자</th><th>권한</th><th>상태</th><th>가입</th><th></th></tr></thead>
+    <tbody>${data.users.map(u=>`<tr>
+      <td><div class="name">${esc(u.name||'(이름 없음)')}</div><div class="sub">${esc(u.email)}</div></td>
+      <td><span class="pill ${u.role==='admin'?'admin':'user'}">${u.role==='admin'?'관리자':'사용자'}</span></td>
+      <td>${pill(u.status)}</td>
+      <td class="sub">${esc(u.createdAt||'-')}${u.approvedAt?`<br>승인 ${esc(u.approvedAt)}`:''}</td>
+      <td class="acts">
+        ${u.status!=='approved'?`<button class="ok" data-act="approve" data-email="${esc(u.email)}">승인</button>`:''}
+        ${u.status!=='rejected'?`<button class="no" data-act="reject" data-email="${esc(u.email)}">거절</button>`:''}
+        ${u.role!=='admin'
+          ? `<button class="ok" data-act="role" data-role="admin" data-email="${esc(u.email)}">관리자로 등업</button>`
+          : `<button data-act="role" data-role="user" data-email="${esc(u.email)}">사용자로 내리기</button>`}
+      </td>
+    </tr>`).join('')}</tbody>
+  </table>`;
+  $('usersBox').querySelectorAll('button[data-act]').forEach(btn=>{
+    btn.onclick=async()=>{
+      const email=btn.dataset.email;
+      const act=btn.dataset.act;
+      const role=btn.dataset.role;
+      if(act==='role' && role==='admin' && !confirm(email+' 계정을 관리자로 등업할까요?\n관리자 콘솔에 들어갈 수 있게 됩니다.')) return;
+      if(act==='role' && role==='user' && !confirm(email+' 계정을 일반 사용자로 내릴까요?')) return;
+      const body={email, action:act};
+      if(role) body.role=role;
+      const res=await api('/api/admin/users',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+      const out=await res.json();
+      if(!res.ok){ alert(out.error||'처리 실패'); return; }
+      if(act==='role' && role==='admin') alert('관리자로 등업했습니다. 해당 사용자는 페이지를 새로고침하면 관리자 메뉴가 보입니다.');
+      loadUsers();
+    };
+  });
+}
+
+async function loadUsage(){
+  const f=$('filterForm');
+  const q=new URLSearchParams({
+    user:f.user.value.trim(),
+    from:f.from.value,
+    to:f.to.value
+  });
+  const r=await api('/api/admin/usage?'+q);
+  const data=await r.json();
+  if(!r.ok){ $('usageBox').textContent=data.error||'불러오기 실패'; return; }
+  if(!data.images.length){ $('usageBox').innerHTML='<div class="empty">조건에 맞는 기록이 없습니다.</div>'; return; }
+  $('usageBox').innerHTML=`<table>
+    <thead><tr><th>사용자</th><th>파일 이름</th><th>이미지 크기</th><th>수정 횟수</th><th>날짜</th></tr></thead>
+    <tbody>${data.images.map(row=>`<tr>
+      <td><div class="name">${esc(row.userName||'(이름 없음)')}</div><div class="sub">${esc(row.userEmail)}</div></td>
+      <td>${esc(row.fileName||'-')}</td>
+      <td>${esc(row.width||0)} × ${esc(row.height||0)} px<br><span class="sub">${esc(bytes(row.bytes))}</span></td>
+      <td><span class="count">${esc(row.editCount||0)}</span>회
+        <div class="edits">${(row.edits||[]).map(t=>esc(t)).join('<br>')||'-'}</div>
+      </td>
+      <td class="sub">최근 ${esc(row.updatedAt||'-')}<br>시작 ${esc(row.createdAt||'-')}</td>
+    </tr>`).join('')}</tbody>
+  </table>`;
+}
+$('filterForm').onsubmit=e=>{ e.preventDefault(); loadUsage(); };
+
+(async()=>{
+  const r=await api('/api/auth/me');
+  if(!r.ok){ location.href='/'; return; }
+  const {user}=await r.json();
+  if(user.role!=='admin' || user.status!=='approved'){ location.href='/'; return; }
+  $('who').textContent=(user.name||user.email)+' · 관리자';
+  await loadUsers();
+  await loadUsage();
+})();
+</script>
+</body>
+</html>
