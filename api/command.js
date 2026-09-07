@@ -41,9 +41,10 @@ function boxMoved(l) {
   return keys.some((k, i) => Math.abs(Number(l[k]) - Number(l[orig[i]])) > 1.2);
 }
 
-/** 현재 박스 좌표(이미지 대비 %)에 그 레이어 스타일로 배치. 목록 아래일수록 앞(위). */
+/** 현재 박스 좌표(이미지 대비 %)에 그 레이어 스타일로 배치. 같은 줄은 목록 위가 왼쪽. */
 function buildResultLayout(list) {
-  return list.map((l, i) => {
+  const lineNote = sameLineReading(list);
+  const items = list.map((l, i) => {
     const word = layerOut(l) ? `"${layerOut(l)}"` : `(원문 "${l.text}"를 지정 언어로 번역)`;
     const z = i === list.length - 1 ? '맨 앞(다른 글자 위)' : (i === 0 ? '맨 뒤(다른 글자 아래)' : `앞에서 ${list.length - i}번째`);
     let s = `${i + 1}번 레이어 ${word}\n  그릴 위치: 가로 ${pct(l.x0)}%~${pct(l.x1)}%, 세로 ${pct(l.y0)}%~${pct(l.y1)}% (이미지 왼쪽·위가 0%, 오른쪽·아래가 100%). 박스 안에 맞춰 그린다.\n  스타일: 원문 "${l.text}" 구간 그대로(색·그라데이션·두께·외곽선·그림자·광택). 자리를 옮겼어도 옆 레이어 색을 가져오지 마라.\n  겹침 순서: ${z}.`;
@@ -51,7 +52,31 @@ function buildResultLayout(list) {
       s += `\n  이동됨: 원래 자리(가로 ${pct(l.ox0)}%~${pct(l.ox1)}%, 세로 ${pct(l.oy0)}%~${pct(l.oy1)}%)의 원문 "${l.text}"는 지우고 주변 배경으로 메운다. 새 글자는 위 새 박스에만 그린다.`;
     }
     return s;
-  }).join('\n\n');
+  });
+  return (lineNote ? lineNote + '\n\n' : '') + items.join('\n\n');
+}
+
+function sameLineReading(list) {
+  const used = new Set();
+  const rows = [];
+  list.forEach((l, i) => {
+    if (used.has(i) || !Number.isFinite(Number(l.y0))) return;
+    const cy = (Number(l.y0) + Number(l.y1)) / 2;
+    const row = [i];
+    used.add(i);
+    list.forEach((o, j) => {
+      if (used.has(j) || !Number.isFinite(Number(o.y0))) return;
+      const oy = (Number(o.y0) + Number(o.y1)) / 2;
+      if (Math.abs(oy - cy) <= 6) { row.push(j); used.add(j); }
+    });
+    row.sort((a, b) => a - b);
+    rows.push(row);
+  });
+  const notes = rows.filter(r => r.length >= 2).map((row, n) => {
+    const seq = row.map(i => layerOut(list[i]) || list[i].text).join(' → ');
+    return `같은 줄 ${n + 1} 왼쪽→오른쪽(목록 순서): ${seq}`;
+  });
+  return notes.length ? '읽기 순서(반드시 이 순서로 한 줄에 배치):\n' + notes.join('\n') : '';
 }
 
 export default async function handler(req, res) {
@@ -93,7 +118,8 @@ ${layoutBlock}
 전체 언어 지정(참고): ${instruction || '(개별 지정 우선)'}
 
 지켜야 할 규칙:
-- **위치는 현재 박스다**: 각 레이어의 새 글자는 지정된 가로·세로 % 박스 안에 맞춘다. 사용자가 박스를 옮기거나 키웠으면 원본 위치가 아니라 그 새 박스에 그린다. 원본 자리와 새 박스가 다르면 원본 자리의 글자는 지우고 배경으로 메운다.
+- **같은 줄 순서**: 목록에서 위에 있는 레이어가 왼쪽, 아래에 있는 레이어가 오른쪽이다. 원본 좌우와 달라도 목록 순서를 따른다. 색·효과는 각 레이어 원문을 따라 그 자리로 이동한다.
+- **위치는 현재 박스다**: 각 레이어의 새 글자는 지정된 가로·세로 % 박스 안에 맞춘다. 원본 자리와 새 박스가 다르면 원본 자리의 글자는 지우고 배경으로 메운다.
 - **스타일은 그 레이어를 따라 이동한다**: 색, 그라데이션, 굵기, 외곽선, 그림자, 입체감, 광택은 그 레이어 원문에서 보인 스타일 그대로다. 박스를 오른쪽으로 옮겼어도 주황 원문은 주황, 갈색 원문은 갈색이다. 새 자리에 있던 옆 글자의 색을 가져오지 마라. 없던 효과를 추가하거나 있던 효과를 빼지 마라. 글자 크기는 박스 높이에 맞게 조절한다.
 - **겹침**: 목록에서 아래(번호가 큰) 레이어를 더 앞에 그린다.
 - **삭제된 레이어는 지운다**: "삭제할 원문"에 적힌 글자는 결과에서 완전히 없앤다. 빈 자리는 주변 배경·그라데이션·무늬로 메운다. 그 글자를 번역하거나 다른 언어로 다시 쓰지 마라.
