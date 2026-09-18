@@ -10,7 +10,7 @@ export default async function handler(req, res) {
   try {
     const { image } = req.body;
     const r = await fetch(
-      'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:generateContent',
+      'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-pro-preview:generateContent',
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
